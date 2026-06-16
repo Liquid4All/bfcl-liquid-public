@@ -13,6 +13,7 @@ from bfcl_eval.model_handler.api_inference.gogoagent import GoGoAgentHandler
 from bfcl_eval.model_handler.api_inference.gorilla import GorillaHandler
 from bfcl_eval.model_handler.api_inference.grok import GrokHandler
 from bfcl_eval.model_handler.api_inference.kimi import KimiHandler
+from bfcl_eval.model_handler.api_inference.liquid_api import LiquidHandler
 from bfcl_eval.model_handler.api_inference.ling import LingAPIHandler
 from bfcl_eval.model_handler.api_inference.mining import MiningHandler
 from bfcl_eval.model_handler.api_inference.mistral import MistralHandler
@@ -47,6 +48,7 @@ from bfcl_eval.model_handler.local_inference.granite import (
 from bfcl_eval.model_handler.local_inference.granite_3 import Granite3FCHandler
 from bfcl_eval.model_handler.local_inference.granite_4 import Granite4FCHandler
 from bfcl_eval.model_handler.local_inference.hammer import HammerHandler
+from bfcl_eval.model_handler.local_inference.lfm2 import LFM2Handler
 from bfcl_eval.model_handler.local_inference.llama import LlamaHandler
 from bfcl_eval.model_handler.local_inference.llama_3_1 import LlamaHandler_3_1
 from bfcl_eval.model_handler.local_inference.minicpm import MiniCPMHandler
@@ -117,6 +119,18 @@ class ModelConfig:
 
 # Inference through API calls
 api_inference_model_map = {
+    "liquid-api": ModelConfig(
+        model_name="liquid-api",
+        display_name="Liquid-API",
+        url="https://huggingface.co/LiquidAI",
+        org="Liquid",
+        license="apache-2.0",
+        model_handler=LiquidHandler,
+        input_price=None,
+        output_price=None,
+        is_fc_model=False,
+        underscore_to_dot=True,
+    ),
     "gorilla-openfunctions-v2": ModelConfig(
         model_name="gorilla-openfunctions-v2",
         display_name="Gorilla-OpenFunctions-v2 (FC)",
@@ -2222,6 +2236,54 @@ third_party_inference_model_map = {
         org="Qwen",
         license="apache-2.0",
         model_handler=QwenAgentNoThinkHandler,
+        input_price=None,
+        output_price=None,
+        is_fc_model=True,
+        underscore_to_dot=True,
+    ),
+    "LiquidAI/LFM2.5-1.2B-Instruct": ModelConfig(
+        model_name="LiquidAI/LFM2.5-1.2B-Instruct",
+        display_name="LFM2.5-1.2B-Instruct",
+        url="https://huggingface.co/LiquidAI/LFM2.5-1.2B-Instruct",
+        org="Liquid AI",
+        license="lfm1.0",
+        model_handler=LFM2Handler,
+        input_price=None,
+        output_price=None,
+        is_fc_model=True,
+        underscore_to_dot=True,
+    ),
+    "LiquidAI/LFM2.5-1.2B-Thinking": ModelConfig(
+        model_name="LiquidAI/LFM2.5-1.2B-Thinking",
+        display_name="LFM2.5-1.2B-Thinking",
+        url="https://huggingface.co/LiquidAI/LFM2.5-1.2B-Thinking",
+        org="Liquid AI",
+        license="lfm1.0",
+        model_handler=LFM2Handler,
+        input_price=None,
+        output_price=None,
+        is_fc_model=True,
+        underscore_to_dot=True,
+    ),
+    "LiquidAI/LFM2.5-8B-A1B": ModelConfig(
+        model_name="LiquidAI/LFM2.5-8B-A1B",
+        display_name="LFM2.5-8B-A1B",
+        url="https://huggingface.co/LiquidAI/LFM2.5-8B-A1B",
+        org="Liquid AI",
+        license="lfm1.0",
+        model_handler=LFM2Handler,
+        input_price=None,
+        output_price=None,
+        is_fc_model=True,
+        underscore_to_dot=True,
+    ),
+    "LiquidAI/LFM2.5-350M": ModelConfig(
+        model_name="LiquidAI/LFM2.5-350M",
+        display_name="LFM2.5-350M",
+        url="https://huggingface.co/LiquidAI/LFM2.5-350M",
+        org="Liquid AI",
+        license="lfm1.0",
+        model_handler=LFM2Handler,
         input_price=None,
         output_price=None,
         is_fc_model=True,

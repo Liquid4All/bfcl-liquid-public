@@ -17,7 +17,7 @@ license = { "text" = "Apache 2.0" }
 dependencies = [
     "requests",
     "tqdm",
-    "numpy==1.26.4",
+    "numpy==2.4.4",
     "pandas",
     "huggingface_hub",
     "pydantic>=2.8.2",
@@ -71,7 +71,7 @@ include = ["bfcl_eval*"]
 Repository = "https://github.com/ShishirPatil/gorilla/tree/main/berkeley-function-call-leaderboard"
 
 [project.optional-dependencies]
-oss_eval_vllm = ["vllm==0.8.5"]
+oss_eval_vllm = ["vllm==0.19.1"]
 oss_eval_sglang = ["sglang[all]"]
 wandb = ["wandb==0.18.5"]
 

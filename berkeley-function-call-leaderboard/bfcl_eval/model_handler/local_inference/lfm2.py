@@ -130,18 +130,42 @@ if getattr(_bfcl_utils.make_json_serializable, "__name__", "") != (
 
 
 def extract_think_block(text: str) -> str:
-    """Return the reasoning inside <think>...</think>, or "" if not present."""
+    """
+    Return the model's reasoning content, or "" if none is present.
+
+    Handles two cases:
+    1. Full block:  <think>...</think>  -- model emitted both tags.
+    2. Prefilled open tag: the chat template injects <think> at the end of the
+       prompt during generation, so the model output contains only the closing
+       </think>. Everything before the first </think> is then the reasoning.
+    """
     if not text:
         return ""
+    # Case 1: explicit opening tag present -> content between the tags.
     match = _THINK_PATTERN.search(text)
-    return match.group(1).strip() if match else ""
+    if match:
+        return match.group(1).strip()
+    # Case 2: no opening tag (prefilled by template) -> everything before </think>.
+    match = re.search(r"([\s\S]*?)</think>", text)
+    if match:
+        return match.group(1).strip()
+    return ""
 
 
 def strip_think_block(text: str) -> str:
-    """Remove all <think>...</think> blocks from the text used for decode/eval."""
-    if text and "<think>" in text and "</think>" in text:
+    """
+    Remove the reasoning block from the text used for decode/eval.
+
+    Mirrors extract_think_block: handles both a full <think>...</think> block and
+    the prefilled case where only the closing </think> is present (the opening tag
+    came from the chat template, not the model output).
+    """
+    if not text or "</think>" not in text:
+        return text
+    if "<think>" in text:
         return _THINK_PATTERN.sub("", text).lstrip("\n")
-    return text
+    # Prefilled open tag: drop everything up to and including the first </think>.
+    return re.sub(r"^[\s\S]*?</think>", "", text).lstrip("\n")
 
 
 def parse_liquid_response(response: str) -> str:

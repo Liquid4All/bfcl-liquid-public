@@ -19,7 +19,6 @@ from bfcl_eval.model_handler.utils import (
     default_decode_ast_prompting,
     default_decode_execute_prompting,
 )
-from bfcl_eval.utils import extract_test_category_from_id, is_agentic
 from openai import OpenAI
 from overrides import override
 
@@ -46,20 +45,16 @@ You SHOULD NOT include any other text in the response.
 At each turn, you should try your best to complete the tasks requested by the user within the current turn. Continue to output functions to call until you have fulfilled the user's request to the best of your ability. Once you have no more functions to call, the system will consider the current turn complete and proceed to the next turn or task.
 """
 
-# Non-restrictive tool-call FORMAT guidance for agentic categories (web_search, memory).
-# Those categories carry BFCL's own system prompt (the {answer,context} format, and for
-# memory the agent role + the available memory tools described inline -- they have NO
-# `function` field, so tools= is empty and the model learns its tools from the system
-# prompt). Prepending LIQUID_SYSTEM_PROMPT_WITHOUT_TOOLS ("you are given a set of possible
-# functions ... only return the function calls") buries that and makes the model report
-# "no applicable tools are available". So for agentic we keep BFCL's prompt and only append
-# the format hint, mirroring LFM2Handler (local_inference/lfm2.py).
-LIQUID_TOOL_CALL_FORMAT_INSTRUCTION = (
-    "When you decide to invoke any of the available function(s), you MUST put the "
-    "call(s) in the format of <|tool_call_start|>[func_name1(params_name1=params_value1, "
-    "params_name2=params_value2...), func_name2(params)]<|tool_call_end|>."
-)
+def build_liquid_tool_prompt(functions: list[dict]) -> str:
+    """Render Liquid tools in the same prompt-native form for every backend."""
+    tool_list = json.dumps(functions, ensure_ascii=False)
+    return f"{LIQUID_SYSTEM_PROMPT_WITHOUT_TOOLS}\nList of tools: {tool_list}"
 
+
+def build_pure_tool_prompt(functions: list[dict]) -> str:
+    """Render Liquid tools in the same prompt-native form for every backend."""
+    tool_list = json.dumps(functions, ensure_ascii=False)
+    return f"List of tools: {tool_list}"
 
 def fmt(v) -> str:
     if isinstance(v, str):
@@ -88,12 +83,48 @@ def convert_jsonl_calls_to_py(tool_dicts: list) -> str:
 
 
 
-def extract_think_block(text: str) -> str | None:
+def extract_think_block(text: str) -> str:
     """
-    Returns the content inside <think>...</think>, or None if not present.
+    Returns the model's reasoning content, or "" if none is present.
+
+    Handles two cases:
+    1. Full block:  <think>...</think>  -- model emitted both tags.
+    2. Prefilled open tag: the chat template injects <think> at the end of the
+       prompt during generation, so the model's output only contains the
+       closing </think>. In that case everything before the first </think>
+       is the reasoning.
     """
+    if not text:
+        return ""
+    # Case 1: explicit opening tag present -> content between the tags.
     m = re.search(r"<think>([\s\S]*?)</think>", text)
-    return m.group(1).strip() if m else ""
+    if m:
+        return m.group(1).strip()
+    # Case 2: no opening tag (prefilled by template) -> everything before </think>.
+    m = re.search(r"([\s\S]*?)</think>", text)
+    if m:
+        return m.group(1).strip()
+    return ""
+
+
+def strip_think_block(text: str) -> str:
+    """
+    Remove the reasoning block from the model output, leaving only the answer.
+
+    Mirrors extract_think_block: handles both a full <think>...</think> block
+    and the prefilled case where only the closing </think> is present (the
+    opening tag came from the chat template, not the model output).
+    """
+    if not text:
+        return text
+    if "</think>" not in text:
+        return text
+    if "<think>" in text:
+        text = re.sub(r"<think>[\s\S]*?</think>", "", text)
+    else:
+        # Prefilled open tag: drop everything up to and including </think>.
+        text = re.sub(r"^[\s\S]*?</think>", "", text)
+    return text.lstrip("\n")
 
 def parse_liquid_response(response: str | None) -> str:
     """
@@ -261,10 +292,9 @@ class LiquidHandler(OpenAICompletionsHandler):
                 formatted_functions.append(func)
         
         inference_data["inference_input_log"] = {"message": repr(message), "tools": formatted_functions}
-        
+
         kwargs = {
             "messages": message,
-            "tools": formatted_functions,
             "model": self.model_name,
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
@@ -272,17 +302,14 @@ class LiquidHandler(OpenAICompletionsHandler):
         extra_body = self._build_extra_body()
         if extra_body:
             kwargs["extra_body"] = extra_body
-        
+
         return self.generate_with_backoff(**kwargs)
 
     def _parse_query_response_prompting_v5(self, api_response: Any) -> dict:
         message = api_response.choices[0].message
         raw_content = message.content or ""
         think_block = extract_think_block(raw_content)
-        if "<think>" in raw_content and "</think>" in raw_content:
-            cleaned_content = re.sub(r"<think>.*?</think>", "", raw_content, flags=re.DOTALL).lstrip("\n")
-        else:
-            cleaned_content = raw_content
+        cleaned_content = strip_think_block(raw_content)
         tool_calls = getattr(message, "tool_calls", None) or []
         decoded_calls = None
         if tool_calls:
@@ -332,11 +359,9 @@ class LiquidHandler(OpenAICompletionsHandler):
 
 
     def _parse_query_response_prompting_v4(self, api_response: Any) -> dict:
-        content_tobe_parsed = api_response.choices[0].message.content
+        content_tobe_parsed = api_response.choices[0].message.content or ""
         think_block = extract_think_block(content_tobe_parsed)
-        if "<think>" in content_tobe_parsed and "</think>" in content_tobe_parsed:
-            content_tobe_parsed = re.sub(r"<think>.*?</think>", "", content_tobe_parsed, flags=re.DOTALL)
-            content_tobe_parsed = content_tobe_parsed.lstrip('\n')
+        content_tobe_parsed = strip_think_block(content_tobe_parsed)
         model_responses = parse_liquid_response(content_tobe_parsed)
         prompt_tokens = api_response.usage.prompt_tokens
         completion_tokens = api_response.usage.completion_tokens
@@ -388,26 +413,14 @@ class LiquidHandler(OpenAICompletionsHandler):
         
         functions = convert_to_tool(functions, GORILLA_TO_OPENAPI, ModelStyle.OPENAI_COMPLETIONS)
 
-        # Agentic categories (web_search, memory) carry BFCL's own system prompt with the
-        # tools described inline; prepending the restrictive LIQUID_SYSTEM_PROMPT_WITHOUT_TOOLS
-        # buries that and makes the model report "no applicable tools are available". Mirror
-        # LFM2Handler: non-agentic -> prepend the restrictive instruction; agentic -> keep
-        # BFCL's prompt and only APPEND the non-restrictive tool-call format hint.
-        is_agentic_category = is_agentic(extract_test_category_from_id(test_entry["id"]))
-        system_injection = (
-            LIQUID_TOOL_CALL_FORMAT_INSTRUCTION
-            if is_agentic_category
-            else LIQUID_SYSTEM_PROMPT_WITHOUT_TOOLS
-        )
-        if prompts and prompts[0].get("role") == "system":
-            if is_agentic_category:
-                prompts[0]["content"] = prompts[0]["content"] + "\n\n" + system_injection
-            else:
-                prompts[0]["content"] = system_injection + "\n\n" + prompts[0]["content"]
-        else:
-            prompts.insert(0, {"role": "system", "content": system_injection})
+        system_prompt = build_liquid_tool_prompt(functions)
 
-        # Return functions separately - they will be passed via tools= parameter in _query_prompting
+        if prompts and prompts[0].get("role") == "system":
+            if "List of tools:" not in prompts[0]["content"]:
+                prompts[0]["content"] = prompts[0]["content"] + "\n\n" + system_prompt
+        else:
+            prompts.insert(0, {"role": "system", "content": system_prompt})
+
         return {"message": [], "function": functions}
 
     @override
@@ -594,8 +607,7 @@ class LiquidFCAPIHandler(OpenAICompletionsHandler):
             content = ""
 
         think_block = extract_think_block(content)
-        if "<think>" in content and "</think>" in content:
-            content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).lstrip("\n")
+        content = strip_think_block(content)
 
         # Extract tool calls from the response
         extracted_tool_calls = extract_tool_calls(content)
@@ -688,8 +700,7 @@ class LiquidFCAPIHandler(OpenAICompletionsHandler):
             content = ""
 
         think_block = extract_think_block(content)
-        if "<think>" in content and "</think>" in content:
-            content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).lstrip("\n")
+        content = strip_think_block(content)
 
         extracted_tool_calls = extract_tool_calls(content)
 
